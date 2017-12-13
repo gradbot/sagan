@@ -1,0 +1,19 @@
+source https://api.nuget.org/v3/index.json
+
+nuget FSharp.Control.AsyncSeq >= 2.0.16
+nuget Microsoft.Azure.DocumentDB
+
+group Build
+  source https://api.nuget.org/v3/index.json
+
+  nuget SourceLink.Fake
+  nuget FAKE
+  nuget FSharp.Formatting
+
+  github fsharp/FAKE modules/Octokit/Octokit.fsx
+
+group Test
+  source https://api.nuget.org/v3/index.json
+
+  nuget NUnit
+  nuget NUnit.Runners
