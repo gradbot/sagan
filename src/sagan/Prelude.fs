@@ -1,5 +1,5 @@
 ﻿[<AutoOpen>]
-module Sagan.Prelude
+module internal Sagan.Prelude
 
 open System
 open System.Threading

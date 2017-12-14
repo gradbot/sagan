@@ -2,14 +2,14 @@ namespace Sagan
 
 open FSharp.Control
 
-type Reactor<'a> = private {
+type internal Reactor<'a> = private {
   send : 'a -> unit
   events : AsyncSeq<'a>
 }
 
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module Reactor =
+module internal Reactor =
 
   let mk<'a> : Reactor<'a> =
     let mb = Mb.create ()
@@ -30,7 +30,7 @@ type ChangeFeedPositionTracker<'a> = private {
 
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module ChangeFeedPositionTracker =
+module internal ChangeFeedPositionTracker =
 
   let start<'a> () = async {
     let reactor = Reactor.mk<'a>
