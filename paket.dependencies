@@ -1,7 +1,7 @@
 source https://api.nuget.org/v3/index.json
 
 nuget FSharp.Control.AsyncSeq >= 2.0.16
-nuget Microsoft.Azure.DocumentDB
+nuget Microsoft.Azure.DocumentDB >= 1.17
 
 group Build
   source https://api.nuget.org/v3/index.json
