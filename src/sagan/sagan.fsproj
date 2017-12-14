@@ -65,7 +65,6 @@
   </Target>
   -->
   <ItemGroup>
-    <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Prelude.fs" />
     <Compile Include="Reactor.fs" />
     <Compile Include="ChangefeedProcessor.fs" />
