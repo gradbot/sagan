@@ -16,14 +16,13 @@ type CosmosEndpoint = {
   collectionName : string
 }
 
-type PartitionPosition = {
-  PartitionId : string
+type RangePosition = {
   RangeMin : int64
   RangeMax : int64
   LastLSN : int64
 }
 
-type ChangefeedPosition = PartitionPosition list
+type ChangeFeedPosition = RangePosition list
 
 /// ChangefeedProcessor configuration
 type Config = {
@@ -37,13 +36,13 @@ type Config = {
   StartingPosition : StartingPosition
 
   /// Position in the Changefeed to stop processing at
-  StoppingPosition : ChangefeedPosition option
+  StoppingPosition : ChangeFeedPosition option
 }
 
 /// ChangefeedProcessor starting position in the DocDB changefeed
 and StartingPosition =
   | Beginning
-  | ChangefeedPosition of ChangefeedPosition
+  | ChangefeedPosition of ChangeFeedPosition
 
 
 type private State = {
@@ -57,10 +56,14 @@ type private State = {
 
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module PartitionPosition =
+module RangePosition =
+  /// Returns true if the range, r, covers the semi-open interval [min, max)
+  let inline rangeCoversMinMax (r:RangePosition) min max =
+    (r.RangeMin <= min) && (r.RangeMax >= max)
+
   /// Returns true if the range of the second argument, y, is fully contained within the first one.
-  let inline fstCoversSnd (x:PartitionPosition) (y:PartitionPosition) =
-    (x.RangeMin <= y.RangeMin) && (x.RangeMax >= y.RangeMax)
+  let inline fstCoversSnd (x:RangePosition) (y:RangePosition) =
+    rangeCoversMinMax x y.RangeMin y.RangeMax
 
   /// Converts a cosmos range string from hex to int64
   let rangeToInt64 str =
@@ -80,22 +83,22 @@ module PartitionPosition =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module ChangeFeedPosition =
-  let fstSucceedsSnd (cfp1:ChangefeedPosition) (cfp2:ChangefeedPosition) =
+  let fstSucceedsSnd (cfp1:ChangeFeedPosition) (cfp2:ChangeFeedPosition) =
     let successionViolationExists =
       seq { // test range covers
         for x in cfp1 do
-          yield cfp2 |> Seq.exists (fun y -> (PartitionPosition.fstCoversSnd x y) && (x.LastLSN > y.LastLSN))
+          yield cfp2 |> Seq.exists (fun y -> (RangePosition.fstCoversSnd x y) && (x.LastLSN > y.LastLSN))
       }
       |> Seq.exists id // find any succession violations
     not successionViolationExists
 
-  let tryPickLatest (cfp1:ChangefeedPosition) (cfp2:ChangefeedPosition) =
+  let tryPickLatest (cfp1:ChangeFeedPosition) (cfp2:ChangeFeedPosition) =
     if fstSucceedsSnd cfp1 cfp2 then Some cfp1
     elif fstSucceedsSnd cfp2 cfp1 then Some cfp2
     else None
 
-  let tryGetPartitionById id (cfp:ChangefeedPosition) =
-    cfp |> List.tryFind (fun pp -> pp.PartitionId = id)
+  let tryGetPartitionByRange min max (cfp:ChangeFeedPosition) =
+    cfp |> List.tryFind (fun rp -> RangePosition.rangeCoversMinMax rp min max)
 
 
 
@@ -114,12 +117,16 @@ let private getPartitions (st:State) = async {
 ///   - Document[] is a batch of documents read from changefeed
 ///   - LSN is the last logical sequence number in the batch.
 let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange) =
+  let rangeMin = pkr.GetPropertyValue "minInclusive" |> RangePosition.rangeToInt64
+  let rangeMax = pkr.GetPropertyValue "maxExclusive" |> RangePosition.rangeToInt64
+
   let continuationToken : string =
     match config.StartingPosition with
     | Beginning -> null
     | ChangefeedPosition cfp ->
       cfp
-      |> List.tryPick (function pp when pp.PartitionId = pkr.Id -> Some(string pp.LastLSN) | _ -> None)
+      |> ChangeFeedPosition.tryGetPartitionByRange rangeMin rangeMax
+      |> Option.map (fun rp -> string rp.LastLSN)
       |> Option.getValueOr null   // docdb starts at the the beginning of a partition if null
   let cfo =
     ChangeFeedOptions(
@@ -131,13 +138,12 @@ let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange)
 
   let rec readPartition (query:Linq.IDocumentQuery<Document>) (pkr:PartitionKeyRange) = asyncSeq {
     let! results = query.ExecuteNextAsync<Document>() |> Async.AwaitTask
-    let pp : PartitionPosition = {
-      PartitionId = pkr.Id
-      RangeMin = pkr.GetPropertyValue "minInclusive" |> PartitionPosition.rangeToInt64
-      RangeMax = pkr.GetPropertyValue "maxExclusive" |> PartitionPosition.rangeToInt64
-      LastLSN = results.ResponseContinuation.Replace("\"", "") |> PartitionPosition.lsnToInt64
+    let rp : RangePosition = {
+      RangeMin = rangeMin
+      RangeMax = rangeMax
+      LastLSN = results.ResponseContinuation.Replace("\"", "") |> RangePosition.lsnToInt64
     }
-    yield (results.ToArray(), pp)
+    yield (results.ToArray(), rp)
     if query.HasMoreResults then
       match config.StoppingPosition with
       | None ->
@@ -145,8 +151,8 @@ let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange)
       | Some cfp ->
         let cont =
           cfp
-          |> ChangeFeedPosition.tryGetPartitionById pkr.Id  // TODO: switch to finding partition by range rather than id (in case of splits)
-          |> Option.map (fun stoppingPosition -> stoppingPosition.LastLSN >= pp.LastLSN)  // TODO: this can stop after the stop position, but this is ok for now. Fix later.
+          |> ChangeFeedPosition.tryGetPartitionByRange rangeMin rangeMax
+          |> Option.map (fun stoppingPosition -> stoppingPosition.LastLSN >= rp.LastLSN)  // TODO: this can stop after the stop position, but this is ok for now. Fix later.
           |> Option.getValueOr true   // if this partition is not specified in the stopping position, then we will treat it as a no stopping position
         if cont then yield! readPartition query pkr
         else ()
@@ -169,22 +175,22 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
   }
 
   // updates the given partition position in the given changefeed position
-  let updateChangefeedPosition (cfp:ChangefeedPosition) (pp:PartitionPosition) =
+  let updateChangefeedPosition (cfp:ChangeFeedPosition) (rp:RangePosition) =
     cfp
-    |> List.choose (function | {PartitionId=pId} when pId=pp.PartitionId -> None | p -> Some p)
-    |> List.cons pp
+    |> List.choose (function | {RangeMin=min; RangeMax=max} when min=rp.RangeMin && max=rp.RangeMax -> None | p -> Some p)
+    |> List.cons rp
 
   // updates changefeed position and add the new element to the list of outputs
-  let accumPartitionsPositions (outputs:'a list, cfp:ChangefeedPosition) (handlerOutput: 'a, pp:PartitionPosition) =
+  let accumPartitionsPositions (outputs:'a list, cfp:ChangeFeedPosition) (handlerOutput: 'a, pp:RangePosition) =
     (handlerOutput::outputs) , (updateChangefeedPosition cfp pp)
 
   // converts a buffered list of handler output to a flat list of outputs and an updated changefeed position
-  let flatten (x: ('a list * ChangefeedPosition) []) : 'a list * ChangefeedPosition =
+  let flatten (x: ('a list * ChangeFeedPosition) []) : 'a list * ChangeFeedPosition =
     let flattenOutputs os =
       Seq.collect id os
       |> Seq.toList
       |> List.rev
-    let flattenPartitionPositions (cfps:ChangefeedPosition[]) = cfps |> Array.tryLast |> Option.getValueOr []
+    let flattenPartitionPositions (cfps:ChangeFeedPosition[]) = cfps |> Array.tryLast |> Option.getValueOr []
     x
     |> Array.unzip
     |> mapPair flattenOutputs flattenPartitionPositions
