@@ -22,7 +22,7 @@ type RangePosition = {
   LastLSN : int64
 }
 
-type ChangeFeedPosition = RangePosition[]
+type ChangefeedPosition = RangePosition[]
 
 /// ChangefeedProcessor configuration
 type Config = {
@@ -36,13 +36,13 @@ type Config = {
   StartingPosition : StartingPosition
 
   /// Position in the Changefeed to stop processing at
-  StoppingPosition : ChangeFeedPosition option
+  StoppingPosition : ChangefeedPosition option
 }
 
 /// ChangefeedProcessor starting position in the DocDB changefeed
 and StartingPosition =
   | Beginning
-  | ChangefeedPosition of ChangeFeedPosition
+  | ChangefeedPosition of ChangefeedPosition
 
 
 type private State = {
@@ -82,8 +82,8 @@ module RangePosition =
 
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module ChangeFeedPosition =
-  let fstSucceedsSnd (cfp1:ChangeFeedPosition) (cfp2:ChangeFeedPosition) =
+module ChangefeedPosition =
+  let fstSucceedsSnd (cfp1:ChangefeedPosition) (cfp2:ChangefeedPosition) =
     let successionViolationExists =
       seq { // test range covers
         for x in cfp1 do
@@ -92,12 +92,12 @@ module ChangeFeedPosition =
       |> Seq.exists id // find any succession violations
     not successionViolationExists
 
-  let tryPickLatest (cfp1:ChangeFeedPosition) (cfp2:ChangeFeedPosition) =
+  let tryPickLatest (cfp1:ChangefeedPosition) (cfp2:ChangefeedPosition) =
     if fstSucceedsSnd cfp1 cfp2 then Some cfp1
     elif fstSucceedsSnd cfp2 cfp1 then Some cfp2
     else None
 
-  let tryGetPartitionByRange min max (cfp:ChangeFeedPosition) =
+  let tryGetPartitionByRange min max (cfp:ChangefeedPosition) =
     cfp |> Array.tryFind (fun rp -> RangePosition.rangeCoversMinMax rp min max)
 
 
@@ -125,7 +125,7 @@ let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange)
     | Beginning -> null
     | ChangefeedPosition cfp ->
       cfp
-      |> ChangeFeedPosition.tryGetPartitionByRange rangeMin rangeMax
+      |> ChangefeedPosition.tryGetPartitionByRange rangeMin rangeMax
       |> Option.map (fun rp -> string rp.LastLSN)
       |> Option.getValueOr null   // docdb starts at the the beginning of a partition if null
   let cfo =
@@ -151,7 +151,7 @@ let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange)
       | Some cfp ->
         let cont =
           cfp
-          |> ChangeFeedPosition.tryGetPartitionByRange rangeMin rangeMax
+          |> ChangefeedPosition.tryGetPartitionByRange rangeMin rangeMax
           |> Option.map (fun stoppingPosition -> stoppingPosition.LastLSN >= rp.LastLSN)  // TODO: this can stop after the stop position, but this is ok for now. Fix later.
           |> Option.getValueOr true   // if this partition is not specified in the stopping position, then we will treat it as a no stopping position
         if cont then yield! readPartition query pkr
@@ -175,7 +175,7 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
   }
 
   // updates the given partition position in the given changefeed position
-  let updateChangefeedPosition (cfp:ChangeFeedPosition) (rp:RangePosition) =
+  let updateChangefeedPosition (cfp:ChangefeedPosition) (rp:RangePosition) =
     let index = cfp |> Array.tryFindIndex (function x -> x.RangeMin=rp.RangeMin && x.RangeMax=rp.RangeMax)
     match index with
     | Some i ->
@@ -189,16 +189,16 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
       newCfp
 
   // updates changefeed position and add the new element to the list of outputs
-  let accumPartitionsPositions (outputs:'a list, cfp:ChangeFeedPosition) (handlerOutput: 'a, pp:RangePosition) =
+  let accumPartitionsPositions (outputs:'a list, cfp:ChangefeedPosition) (handlerOutput: 'a, pp:RangePosition) =
     (handlerOutput::outputs) , (updateChangefeedPosition cfp pp)
 
   // converts a buffered list of handler output to a flat list of outputs and an updated changefeed position
-  let flatten (x: ('a list * ChangeFeedPosition) []) : 'a list * ChangeFeedPosition =
+  let flatten (x: ('a list * ChangefeedPosition) []) : 'a list * ChangefeedPosition =
     let flattenOutputs os =
       Seq.collect id os
       |> Seq.toList
       |> List.rev
-    let flattenPartitionPositions (cfps:ChangeFeedPosition[]) = cfps |> Array.tryLast |> Option.getValueOr [||]
+    let flattenPartitionPositions (cfps:ChangefeedPosition[]) = cfps |> Array.tryLast |> Option.getValueOr [||]
     x
     |> Array.unzip
     |> mapPair flattenOutputs flattenPartitionPositions

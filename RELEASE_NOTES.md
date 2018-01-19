@@ -1,3 +1,6 @@
+### 0.0.4
+* Changed `ChangeFeed` to `Changefeed` in type and module names for consistency
+
 ### 0.0.3
 * Changed `PartitionPosition` to `RangePosition` (without `PartitionId`)
 * Changed `ChangeFeedPosition` from `RangePosition list` to `RangePosition[]`
