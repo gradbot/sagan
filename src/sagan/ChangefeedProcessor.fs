@@ -22,7 +22,7 @@ type RangePosition = {
   LastLSN : int64
 }
 
-type ChangeFeedPosition = RangePosition list
+type ChangeFeedPosition = RangePosition[]
 
 /// ChangefeedProcessor configuration
 type Config = {
@@ -98,7 +98,7 @@ module ChangeFeedPosition =
     else None
 
   let tryGetPartitionByRange min max (cfp:ChangeFeedPosition) =
-    cfp |> List.tryFind (fun rp -> RangePosition.rangeCoversMinMax rp min max)
+    cfp |> Array.tryFind (fun rp -> RangePosition.rangeCoversMinMax rp min max)
 
 
 
@@ -176,9 +176,17 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
 
   // updates the given partition position in the given changefeed position
   let updateChangefeedPosition (cfp:ChangeFeedPosition) (rp:RangePosition) =
-    cfp
-    |> List.choose (function | {RangeMin=min; RangeMax=max} when min=rp.RangeMin && max=rp.RangeMax -> None | p -> Some p)
-    |> List.cons rp
+    let index = cfp |> Array.tryFindIndex (function x -> x.RangeMin=rp.RangeMin && x.RangeMax=rp.RangeMax)
+    match index with
+    | Some i ->
+      cfp.[i] <- rp
+      cfp
+    | None ->
+      let newCfp = Array.zeroCreate (cfp.Length+1)
+      for i in 0..cfp.Length-1 do
+        newCfp.[i] <- cfp.[i]
+      newCfp.[cfp.Length] <- rp
+      newCfp
 
   // updates changefeed position and add the new element to the list of outputs
   let accumPartitionsPositions (outputs:'a list, cfp:ChangeFeedPosition) (handlerOutput: 'a, pp:RangePosition) =
@@ -190,7 +198,7 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
       Seq.collect id os
       |> Seq.toList
       |> List.rev
-    let flattenPartitionPositions (cfps:ChangeFeedPosition[]) = cfps |> Array.tryLast |> Option.getValueOr []
+    let flattenPartitionPositions (cfps:ChangeFeedPosition[]) = cfps |> Array.tryLast |> Option.getValueOr [||]
     x
     |> Array.unzip
     |> mapPair flattenOutputs flattenPartitionPositions
@@ -207,7 +215,7 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
   let! progressTracker =
     progressReactor
     |> Reactor.recv
-    |> AsyncSeq.scan accumPartitionsPositions ([],[])
+    |> AsyncSeq.scan accumPartitionsPositions ([],[||])
     |> AsyncSeq.bufferByTime (int config.ProgressInterval.TotalMilliseconds)
     |> AsyncSeq.iterAsync (flatten >> progressHandler)
     |> Async.StartChild
