@@ -1,3 +1,6 @@
+### 0.0.5
+* Fixed issue with partition workers exiting when reaching end of changfeed
+
 ### 0.0.4
 * Changed `ChangeFeed` to `Changefeed` in type and module names for consistency
 
