@@ -137,26 +137,30 @@ let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange)
   let query = st.client.CreateDocumentChangeFeedQuery(st.collectionUri, cfo)
 
   let rec readPartition (query:Linq.IDocumentQuery<Document>) (pkr:PartitionKeyRange) = asyncSeq {
-    let! results = query.ExecuteNextAsync<Document>() |> Async.AwaitTask
+    let! response = query.ExecuteNextAsync<Document>() |> Async.AwaitTask
+
     let rp : RangePosition = {
       RangeMin = rangeMin
       RangeMax = rangeMax
-      LastLSN = results.ResponseContinuation.Replace("\"", "") |> RangePosition.lsnToInt64
+      LastLSN = response.ResponseContinuation.Replace("\"", "") |> RangePosition.lsnToInt64
     }
-    yield (results.ToArray(), rp)
-    if query.HasMoreResults then
-      match config.StoppingPosition with
-      | None ->
+    if response <> null then
+      if response.Count > 0 then
+        yield (response.ToArray(), rp)
+      if query.HasMoreResults then
+        match config.StoppingPosition with
+        | None ->
+          yield! readPartition query pkr
+        | Some cfp ->
+          let cont =
+            cfp
+            |> ChangefeedPosition.tryGetPartitionByRange rangeMin rangeMax
+            |> Option.map (fun stoppingPosition -> stoppingPosition.LastLSN >= rp.LastLSN)  // TODO: this can stop after the stop position, but this is ok for now. Fix later.
+            |> Option.getValueOr true   // if this partition is not specified in the stopping position, then we will treat it as a no stopping position
+          if cont then yield! readPartition query pkr
+          else ()
+      else
         yield! readPartition query pkr
-      | Some cfp ->
-        let cont =
-          cfp
-          |> ChangefeedPosition.tryGetPartitionByRange rangeMin rangeMax
-          |> Option.map (fun stoppingPosition -> stoppingPosition.LastLSN >= rp.LastLSN)  // TODO: this can stop after the stop position, but this is ok for now. Fix later.
-          |> Option.getValueOr true   // if this partition is not specified in the stopping position, then we will treat it as a no stopping position
-        if cont then yield! readPartition query pkr
-        else ()
-    else ()
 
   }
   readPartition query pkr
