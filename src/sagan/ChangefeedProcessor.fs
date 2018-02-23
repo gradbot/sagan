@@ -234,3 +234,37 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
 
   return! Async.choose progressTracker workers
 }
+
+
+/// Periodically queries DocDB for the latest positions of all partitions in its changefeed.
+/// The `handler` function will be called periodically, once per `interval`, with an updated ChangefeedPosition.
+let trackTailPosition (cosmos:CosmosEndpoint) (interval:TimeSpan) (handler:ChangefeedPosition -> Async<unit>) = async {
+  use client = new DocumentClient(cosmos.uri, cosmos.authKey)
+  let state = {
+    client = client
+    collectionUri = UriFactory.CreateDocumentCollectionUri(cosmos.databaseName, cosmos.collectionName)
+  }
+
+  let getRecentPosition (pkr:PartitionKeyRange) = async {
+    let cfo = ChangeFeedOptions(PartitionKeyRangeId = pkr.Id, StartTime = Nullable DateTime.Now)
+    let query = client.CreateDocumentChangeFeedQuery(state.collectionUri, cfo)
+    let! response = query.ExecuteNextAsync<Document>() |> Async.AwaitTask
+    let rp : RangePosition = {
+      RangeMin = pkr.GetPropertyValue "minInclusive" |> RangePosition.rangeToInt64
+      RangeMax = pkr.GetPropertyValue "maxExclusive" |> RangePosition.rangeToInt64
+      LastLSN = response.ResponseContinuation.Replace("\"", "") |> RangePosition.lsnToInt64
+    }
+    return rp
+  }
+
+  let! partitions = getPartitions state   // NOTE: partitions will only be fetched once. Consider moving this inside the query function in case of a docdb partition split.
+  let queryPartitions = fun _ ->
+    partitions
+    |> Array.map getRecentPosition
+    |> Async.Parallel
+
+  return!
+    AsyncSeq.intervalMs (int interval.TotalMilliseconds)
+    |> AsyncSeq.mapAsyncParallel queryPartitions
+    |> AsyncSeq.iterAsync handler
+}
