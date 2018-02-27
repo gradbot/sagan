@@ -1,5 +1,6 @@
 ### 0.0.7
 * Made changefeed processor handler function take range position as argument
+* Added timestamp information to the changefeed processor tail tracker
 
 ### 0.0.6
 * Added changefeed tail position tracking
