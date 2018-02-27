@@ -1,3 +1,6 @@
+### 0.0.8
+* Fixed an issue where the changefeed processor always read one batch regardless of start and stop positions.
+
 ### 0.0.7
 * Made changefeed processor handler function take range position as argument
 * Added timestamp information to the changefeed processor tail tracker
