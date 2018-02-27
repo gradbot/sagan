@@ -113,9 +113,10 @@ let private getPartitions (st:State) = async {
 }
 
 
-/// Reads a partition of the changefeed and returns an AsyncSeq<Document[] * LSN>
+/// Reads a partition of the changefeed and returns an AsyncSeq<Document[] * RangePosition>
 ///   - Document[] is a batch of documents read from changefeed
-///   - LSN is the last logical sequence number in the batch.
+///   - RangePosition is a record containing the partition's key range and the last logical sequence number in the batch.
+/// This function attempts to read all documents in the semi-closed LSN range [start, end).
 let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange) =
   let rangeMin = pkr.GetPropertyValue "minInclusive" |> RangePosition.rangeToInt64
   let rangeMax = pkr.GetPropertyValue "maxExclusive" |> RangePosition.rangeToInt64
@@ -128,6 +129,10 @@ let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange)
       |> ChangefeedPosition.tryGetPartitionByRange rangeMin rangeMax
       |> Option.map (fun rp -> string rp.LastLSN)
       |> Option.getValueOr null   // docdb starts at the the beginning of a partition if null
+  let stoppingPosition =
+    config.StoppingPosition
+    |> Option.bind (ChangefeedPosition.tryGetPartitionByRange rangeMin rangeMax)
+    |> Option.map (fun rp -> rp.LastLSN)
   let cfo =
     ChangeFeedOptions(
       PartitionKeyRangeId = pkr.Id,
@@ -148,22 +153,20 @@ let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange)
       if response.Count > 0 then
         yield (response.ToArray(), rp)
       if query.HasMoreResults then
-        match config.StoppingPosition with
-        | None ->
-          yield! readPartition query pkr
-        | Some cfp ->
-          let cont =
-            cfp
-            |> ChangefeedPosition.tryGetPartitionByRange rangeMin rangeMax
-            |> Option.map (fun stoppingPosition -> stoppingPosition.LastLSN >= rp.LastLSN)  // TODO: this can stop after the stop position, but this is ok for now. Fix later.
-            |> Option.getValueOr true   // if this partition is not specified in the stopping position, then we will treat it as a no stopping position
-          if cont then yield! readPartition query pkr
-          else ()
+        match stoppingPosition with
+        | Some stopLSN when rp.LastLSN >= stopLSN -> ()   // TODO: this can stop after the stop position, but this is ok for now. Fix later.
+        | _ -> yield! readPartition query pkr
       else
         yield! readPartition query pkr
-
   }
-  readPartition query pkr
+
+  let startLSN =
+    if continuationToken = null then Int64.MinValue
+    else int64 continuationToken
+
+  match stoppingPosition with
+  | Some stopLSN when startLSN >= stopLSN -> AsyncSeq.empty
+  | _ -> readPartition query pkr
 
 
 /// Returns an async computation that runs a concurrent (per-docdb-partition) changefeed processor.
