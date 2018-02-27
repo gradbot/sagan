@@ -212,8 +212,8 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
   let progressReactor = Reactor.mk
 
   // wrap the document handler so that it takes and passes out partition position
-  let handle (doc, pp) = async {
-    let! ret = handle doc
+  let handle ((_doc, pp) as input) = async {
+    let! ret = handle input
     (ret, pp) |> Reactor.send progressReactor
   }
   let! progressTracker =
