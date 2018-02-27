@@ -1,3 +1,6 @@
+### 0.0.7
+* Made changefeed processor handler function take range position as argument
+
 ### 0.0.6
 * Added changefeed tail position tracking
 
