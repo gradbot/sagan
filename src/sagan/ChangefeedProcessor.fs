@@ -186,8 +186,9 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
     let index = cfp |> Array.tryFindIndex (function x -> x.RangeMin=rp.RangeMin && x.RangeMax=rp.RangeMax)
     match index with
     | Some i ->
-      cfp.[i] <- rp
-      Array.copy cfp
+      let newCfp = Array.copy cfp
+      newCfp.[i] <- rp
+      newCfp
     | None ->
       let newCfp = Array.zeroCreate (cfp.Length+1)
       for i in 0..cfp.Length-1 do
