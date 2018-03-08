@@ -187,7 +187,7 @@ let go (cosmos:CosmosEndpoint) (config:Config) handle progressHandler = async {
     match index with
     | Some i ->
       cfp.[i] <- rp
-      cfp
+      Array.copy cfp
     | None ->
       let newCfp = Array.zeroCreate (cfp.Length+1)
       for i in 0..cfp.Length-1 do
