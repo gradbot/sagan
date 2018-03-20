@@ -1,3 +1,6 @@
+### 0.0.9
+* Added a retry delay for querying a partition when the changefeed processor reaches the tail of that partition.
+
 ### 0.0.8
 * Fixed an issue where the changefeed processor always read one batch regardless of start and stop positions.
 

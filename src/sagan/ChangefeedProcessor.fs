@@ -32,6 +32,9 @@ type Config = {
   /// Interval between invocations of `progressHandler`
   ProgressInterval : TimeSpan
 
+  /// Wait time for successive queries of a changefeed partition if its tail position is reached
+  RetryDelay : TimeSpan
+
   /// Position in the Changefeed to begin processing from
   StartingPosition : StartingPosition
 
@@ -157,6 +160,7 @@ let rec private readPartition (config:Config) (st:State) (pkr:PartitionKeyRange)
         | Some stopLSN when rp.LastLSN >= stopLSN -> ()   // TODO: this can stop after the stop position, but this is ok for now. Fix later.
         | _ -> yield! readPartition query pkr
       else
+        do! Async.Sleep (int config.RetryDelay.TotalMilliseconds)
         yield! readPartition query pkr
   }
 
