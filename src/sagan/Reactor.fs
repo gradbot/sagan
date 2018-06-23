@@ -24,9 +24,10 @@ module internal Reactor =
     { send = (fun b -> r.send (g b)) ; events = r.events |> AsyncSeq.map f }
 
 
-type internal ChangefeedPositionTracker<'a> = private {
-  channel :  Reactor<'a>
-}
+type internal ChangefeedPositionTracker<'a> = 
+  private {
+    channel :  Reactor<'a>
+  }
 
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -37,7 +38,6 @@ module internal ChangefeedPositionTracker =
     let proc =
       reactor
       |> Reactor.recv
-      |> AsyncSeq.iterAsync (fun p -> async {
-        return () })
-    return { channel = reactor },proc
+      |> AsyncSeq.iterAsync (fun p -> async { return () })
+    return { channel = reactor }, proc
   }
